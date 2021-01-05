@@ -18,4 +18,9 @@ namespace MyPublisherSubscriber
     {
         ValueTask GetNextElementAsync(int maxElements, Func<IReadOnlyList<T>, ValueTask> executeCallback);
     }
+    
+    
+    public class ExecutionIsStopped : Exception{
+    
+    }
 }

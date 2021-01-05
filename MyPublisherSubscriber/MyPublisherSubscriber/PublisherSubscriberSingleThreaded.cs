@@ -19,12 +19,13 @@ namespace MyPublisherSubscriber
 
             public static NextElement Create()
             {
-                return new NextElement(new TaskCompletionSource<T>());
+                return new (new TaskCompletionSource<T>());
             }
         }
         
         
         private readonly LinkedList<NextElement> _queue = new ();
+        private bool _stopped;
 
         private TaskCompletionSource<T> GetNextTaskToPublish()
         {
@@ -44,6 +45,9 @@ namespace MyPublisherSubscriber
         
         public void Publish(T item)
         {
+            if (_stopped)
+                throw new Exception("Stopped");
+            
             var nextTask = GetNextTaskToPublish();
             nextTask.SetResult(item);
         }
@@ -51,7 +55,9 @@ namespace MyPublisherSubscriber
         private NextElement GetNextTaskToSubscribe()
         {
             lock (_queue)
+            {
                 return _queue.First.Value;
+            }
         }
 
         private void RemoveAwaitedTask()
@@ -60,17 +66,14 @@ namespace MyPublisherSubscriber
                 _queue.RemoveFirst();
         }
 
-
-
-        private readonly List<Action<ExecutionStatistic<T>>> _statisticSubscribers = new List<Action<ExecutionStatistic<T>>>();
+        private readonly List<Action<ExecutionStatistic<T>>> _statisticSubscribers = new ();
 
         public PublisherSubscriberSingleThreaded<T> SubscribeToExecutionStatistic(Action<ExecutionStatistic<T>> executionStatistic)
         {
             _statisticSubscribers.Add(executionStatistic);
             return this;
         }
-
-
+        
         public void PublishStatistics(in NextElement nextElement, DateTime startExecution, Exception ex = null)
         {
             if (_statisticSubscribers.Count == 0)
@@ -110,6 +113,15 @@ namespace MyPublisherSubscriber
             catch (Exception e)
             {
                 PublishStatistics(nextTask, executionStart, e);
+            }
+        }
+
+        public void Stop()
+        {
+            lock (_queue)
+            {
+                _queue.Last.Value.Task.SetException(new ExecutionIsStopped());
+                _stopped = true;      
             }
         }
     }

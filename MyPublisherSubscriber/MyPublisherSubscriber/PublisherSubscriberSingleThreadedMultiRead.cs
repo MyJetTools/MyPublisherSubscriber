@@ -7,7 +7,17 @@ namespace MyPublisherSubscriber
 {
     public class PublisherSubscriberSingleThreadedMultiRead<T> : IPublisher<T>, ISubscriberMultiResult<T>
     {
-        public readonly struct Element
+        private interface IElement
+        {
+            
+        }
+
+        private record StopIt : IElement
+        {
+            
+        }
+        
+        public readonly struct Element : IElement
         {
             public Element(T item)
             {
@@ -18,7 +28,7 @@ namespace MyPublisherSubscriber
             public DateTime Published { get; }
         }
 
-        private readonly Queue<Element> _queue = new ();
+        private readonly Queue<IElement> _queue = new ();
 
         private readonly object _lockObject = new ();
 
@@ -26,8 +36,14 @@ namespace MyPublisherSubscriber
         private TaskCompletionSource<IReadOnlyList<Element>> _awaitingTask = new();
         private int _maxElements = 0;
 
+        private bool _stopped;
+
         public void Publish(T item)
         {
+
+            if (_stopped)
+                throw new ExecutionIsStopped();
+            
             var nextElement = new Element(item);
          
             lock (_lockObject)
@@ -38,7 +54,15 @@ namespace MyPublisherSubscriber
                 {
                     var result = _awaitingTask;
                     _awaitingTask = null;
-                    result.SetResult(GetElements(_maxElements));
+                    try
+                    {
+                        result.SetResult(GetElements(_maxElements));
+                    }
+                    catch (Exception e)
+                    {
+                        result.SetException(e);
+                    }
+
                 }
             }
         }
@@ -52,14 +76,18 @@ namespace MyPublisherSubscriber
         }
 
 
-        private void InvokeStatistics(IReadOnlyList<Element> items, Exception e)
+        private void InvokeStatistics(IReadOnlyList<Element> items, Exception ex)
         {
             if (_statisticSubscribers.Count == 0)
+            {
+                if (ex != null)
+                    Console.WriteLine(
+                        "Exception during the subscriber execution. . " + ex);
                 return;
+            }
             
             foreach (var subscriber in _statisticSubscribers)
-                subscriber(items, e);
-            
+                subscriber(items, ex);
         }
 
         private List<Element> GetElements(int maxElements)
@@ -73,7 +101,11 @@ namespace MyPublisherSubscriber
             while (_queue.Count > 0 && maxElements > 0)
             {
                 var item = _queue.Dequeue();
-                result.Add(item);
+                if (item is StopIt)
+                    throw new ExecutionIsStopped();
+
+                if (item is Element element)
+                    result.Add(element);
             }
 
             return result;
@@ -120,6 +152,15 @@ namespace MyPublisherSubscriber
             }
 
             return Execute(executeCallback, elements);
+        }
+
+        public void Stop()
+        {
+            lock (_lockObject)
+            {
+                _stopped = true;
+                _queue.Enqueue(new StopIt());
+            }
         }
 
     }
